@@ -70,7 +70,7 @@ public abstract class Neurone implements iNeurone
 	// Fonction d'apprentissage relative à la mse
 	public void apprentissage(final float[][] entrees, final float[] resultats, final float MSElimite)
 	{
-		double mse = 0.;
+		double mse;
 		int iter = 0;
 		do
 		{

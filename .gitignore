@@ -2,3 +2,4 @@
 dataset_animaux/
 
 .fake
+*.class

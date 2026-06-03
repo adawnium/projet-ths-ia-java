@@ -53,7 +53,7 @@ public class ReconnaissanceAnimaux {
         return dataset;
     }
 
-     public static Dataset chargerEtAppliquerFFT(String repertoireBase) {
+    public static Dataset chargerEtAppliquerFFT(String repertoireBase) {
         List<String> chats = Image.listeFichiers(repertoireBase + "/cat");
         List<String> chiens = Image.listeFichiers(repertoireBase + "/dog");
         List<String> sauvages = Image.listeFichiers(repertoireBase + "/wild");
@@ -81,26 +81,21 @@ public class ReconnaissanceAnimaux {
         for (int i = 0; i < nbImages; i++) {
             String chemin = tousLesFichiers.get(i);
             int label = chemin.contains("cat")  ? 0
-          : chemin.contains("dog")  ? 1
-          : chemin.contains("wild") ? 2
-          : 3;
+            : chemin.contains("dog")  ? 1
+            : chemin.contains("wild") ? 2
+            : 3;
             Image img = new Image(chemin, label, true);
             dataset.resultats[i] = img.label();
 
             int[] pixelsBruts = img.donnees();
             Complexe[] signalComplexe = new Complexe[nbPixels];
 
-            // 1. Conversion des pixels en nombres complexes (partie imaginaire = 0)
             for (int p = 0; p < nbPixels; p++) {
                 signalComplexe[p] = new ComplexeCartesien(pixelsBruts[p], 0);
             }
 
-            // 2. Application de la transformée de Fourier
-            // ATTENTION: Remplacer "appliqueSur" par la méthode exacte de votre fichier FFTCplx 
-            // (ex: FFTCplx.fft(), FFTCplx.calcule(), etc.)
             Complexe[] spectreFFT = FFTCplx.appliqueSur(signalComplexe);
 
-            // 3. Extraction du module (amplitude) et recherche du maximum
             float maxAmplitude = 0.0001f; // Évite la division par zéro
             for (int p = 0; p < nbPixels; p++) {
                 float amplitude = (float) spectreFFT[p].mod();
@@ -111,7 +106,6 @@ public class ReconnaissanceAnimaux {
                 }
             }
 
-            // 4. Normalisation "maison" [0, 1] basée sur l'amplitude maximale de l'image
             for (int p = 0; p < nbPixels; p++) {
                 dataset.entrees[i][p] = dataset.entrees[i][p] / maxAmplitude;
             }
@@ -133,8 +127,6 @@ public class ReconnaissanceAnimaux {
         }
     }
 
-    // Construit un tableau de cibles binaires : 1.0 si l'image appartient à
-    // la classe ciblée, 0.0 sinon — puis lance l'apprentissage.
     public static iNeurone entrainerNeurone(Dataset trainData, int classCible, float MSElimite) {
         int nbImages = trainData.resultats.length;
         float[] ciblesBinaires = new float[nbImages];

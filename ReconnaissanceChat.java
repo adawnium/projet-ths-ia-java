@@ -9,6 +9,7 @@ public class ReconnaissanceChat {
     public static class Dataset {
         public float[][] entrees;
         public float[] resultats;
+        public float valeurMaxFFT; // pour stocker la valeur maximale de l'espace fréquentiel (pour la normalisation)
     }
 
     public static Dataset chargerEtLabeliser(String repertoireBase) {
@@ -51,20 +52,20 @@ public class ReconnaissanceChat {
 
             
             // NORMALISATION : on passe de 0 à 255 à 0 à 1
-            // int[] pixelsBruts = img.donnees();
-            // for (int p = 0; p < nbPixels; p++) {
-            //     dataset.entrees[i][p] = pixelsBruts[p] / 255.0f;
-            // }
-
-            float[] tsl = ConversionTSL.convertirEnTSL(img);
+            int[] pixelsBruts = img.donnees();
             for (int p = 0; p < nbPixels; p++) {
-                dataset.entrees[i][p] = tsl[p]; // déjà entre 0 et 1
+                dataset.entrees[i][p] = pixelsBruts[p] / 255.0f;
             }
+
+            // float[] tsl = ConversionTSL.convertirEnTSL(img);
+            // for (int p = 0; p < nbPixels; p++) {
+            //     dataset.entrees[i][p] = tsl[p]; // déjà entre 0 et 1
+            // }
         }
         return dataset;
     }
 
-    public static Dataset chargerEtAppliquerFFT(String repertoireBase) {
+    public static Dataset chargerEtAppliquerFFT(String repertoireBase, float maxForce) {
         List<String> chats = Image.listeFichiers(repertoireBase + "/cat");
         List<String> chiens = Image.listeFichiers(repertoireBase + "/dog");
         List<String> sauvages = Image.listeFichiers(repertoireBase + "/wild");
@@ -74,75 +75,67 @@ public class ReconnaissanceChat {
         if (chiens != null) tousLesFichiers.addAll(chiens);
         if (sauvages != null) tousLesFichiers.addAll(sauvages);
         
-        if (tousLesFichiers.isEmpty()) {
-            System.err.println("Erreur: Aucun fichier trouvé dans " + repertoireBase);
-            return null;
-        }
+        if (tousLesFichiers.isEmpty()) return null;
 
         int nbImages = tousLesFichiers.size();
-        Image premiereImage = new Image(tousLesFichiers.get(0), 1, true);
+        Image premiereImage = new Image(tousLesFichiers.get(0), 0, true);
         int nbPixels = premiereImage.taille();
 
         Dataset dataset = new Dataset();
         dataset.entrees = new float[nbImages][nbPixels];
         dataset.resultats = new float[nbImages];
 
-        System.out.println("Chargement et calcul FFT de " + nbImages + " images depuis " + repertoireBase + "...");
+        float[][] modulesFFTBruts = new float[nbImages][nbPixels];
+        
+        float maxGlobalFFT = maxForce; 
+        boolean doitCalculerMax = (maxForce <= 0.0f);
 
         for (int i = 0; i < nbImages; i++) {
             String chemin = tousLesFichiers.get(i);
-            int label = chemin.contains("cat") ? 1 : 0; 
-            Image img = new Image(chemin, label, true);
-            dataset.resultats[i] = img.label();
-
+            Image img = new Image(chemin, 0, true); // N&B forcé
             int[] pixelsBruts = img.donnees();
-            Complexe[] signalComplexe = new Complexe[nbPixels];
 
-            // 1. Conversion des pixels en nombres complexes (partie imaginaire = 0)
-            for (int p = 0; p < nbPixels; p++) {
-                signalComplexe[p] = new ComplexeCartesien(pixelsBruts[p], 0);
+            Complexe[] signalEntree = new Complexe[nbPixels];
+            for (int j = 0; j < nbPixels; j++) {
+                signalEntree[j] = new ComplexeCartesien(pixelsBruts[j], 0.0);
             }
 
-            // 2. Application de la transformée de Fourier
-            // ATTENTION: Remplacer "appliqueSur" par la méthode exacte de votre fichier FFTCplx 
-            // (ex: FFTCplx.fft(), FFTCplx.calcule(), etc.)
-            Complexe[] spectreFFT = FFTCplx.appliqueSur(signalComplexe);
+            Complexe[] signalTransforme = FFTCplx.appliqueSur(signalEntree);
 
-            // 3. Extraction du module (amplitude) et recherche du maximum
-            float maxAmplitude = 0.0001f; // Évite la division par zéro
-            for (int p = 0; p < nbPixels; p++) {
-                float amplitude = (float) spectreFFT[p].mod();
-                dataset.entrees[i][p] = amplitude;
-                
-                if (amplitude > maxAmplitude) {
-                    maxAmplitude = amplitude;
+            for (int j = 0; j < nbPixels; j++) {
+                modulesFFTBruts[i][j] = (float) signalTransforme[j].mod();
+    
+                if (doitCalculerMax && modulesFFTBruts[i][j] > maxGlobalFFT) {
+                    maxGlobalFFT = modulesFFTBruts[i][j];
                 }
             }
+            dataset.resultats[i] = chemin.contains("cat") ? 1.0f : 0.0f;
+        }
 
-            // 4. Normalisation "maison" [0, 1] basée sur l'amplitude maximale de l'image
-            for (int p = 0; p < nbPixels; p++) {
-                dataset.entrees[i][p] = dataset.entrees[i][p] / maxAmplitude;
+        dataset.valeurMaxFFT = maxGlobalFFT;
+
+        if (maxGlobalFFT > 0) {
+            for (int i = 0; i < nbImages; i++) {
+                for (int j = 0; j < nbPixels; j++) {
+                    dataset.entrees[i][j] = modulesFFTBruts[i][j] / maxGlobalFFT;
+                }
             }
         }
+
         return dataset;
     }
 
-    // algo de fisher yates pour mélanger les données d'entrainement et leur label de facon aléatoire
     public static void melangerDataset(Dataset dataset) {
-        System.out.println("Mélange en cours");
         int n = dataset.resultats.length;
         Random random = new Random();
-        
         for (int i = n - 1; i > 0; i--) {
             int j = random.nextInt(i + 1);
-            
-            float[] tempEntree = dataset.entrees[i];
+            float[] tempE = dataset.entrees[i];
             dataset.entrees[i] = dataset.entrees[j];
-            dataset.entrees[j] = tempEntree;
-            
-            float tempResultat = dataset.resultats[i];
+            dataset.entrees[j] = tempE;
+            float tempR = dataset.resultats[i];
             dataset.resultats[i] = dataset.resultats[j];
-            dataset.resultats[j] = tempResultat;
+            dataset.resultats[j] = tempR;
         }
     }
 
@@ -150,8 +143,10 @@ public class ReconnaissanceChat {
         
         System.out.println("CHARGEMENT DES IMAGES D'ENTRAINEMENT");
         //Dataset trainData = chargerEtLabeliser("dataset_animaux/train");
-        Dataset trainData = chargerEtAppliquerFFT("dataset_animaux/train");
+        Dataset trainData = chargerEtAppliquerFFT("dataset_animaux/train", 0.0f); // 0.0f car on force le calcul de la valeur max pour la normalisation
         if (trainData == null) return;
+
+        float maxValeurFFTTrain = trainData.valeurMaxFFT; 
         
         //on mélange les données
         melangerDataset(trainData);
@@ -166,8 +161,8 @@ public class ReconnaissanceChat {
         System.out.println("Création d'un neurone avec " + nbPixels + " synapses.");
         
         //choix du modèle de neurone (à décommenter au besoin)
+        iNeurone neurone = new NeuroneSigmoide(nbPixels);
         //iNeurone neurone = new NeuroneReLU(nbPixels);
-         iNeurone neurone = new NeuroneSigmoide(nbPixels);
         // iNeurone neurone = new NeuroneHeavyside(nbPixels);
         final float MSElimite = 0.10f; 
         
@@ -175,8 +170,8 @@ public class ReconnaissanceChat {
         neurone.apprentissage(trainData.entrees, trainData.resultats, MSElimite);
 
         System.out.println("\nPHASE DE TEST");
-        //Dataset testData = chargerEtLabeliser("dataset_animaux/test");
-        Dataset testData = chargerEtAppliquerFFT("dataset_animaux/test");
+        // Dataset testData = chargerEtLabeliser("dataset_animaux/test");
+        Dataset testData = chargerEtAppliquerFFT("dataset_animaux/test", maxValeurFFTTrain);
 
         if (testData == null) return;
 

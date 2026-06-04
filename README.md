@@ -1,22 +1,40 @@
 # projet-ths-ia-java
 
-Par soucis de facilité (et aussi de bug Java inrésolvables), tous les fichiers sont à la racine du projet.
+Projet Java d'exploration d'un perceptron simple pour la reconnaissance binaire d'images (chat / pas chat).
 
-Avant de compiler et lancer un fichier, veuillez importer le dossier nommé "dataset_animaux" à la racine du projet. 
-=> dataset_animaux/ doit contenir les deux sous-dossiers test/ et train/ contenant eux-même chacun cat/ dog/ et wild/
+Remarques générales
+- Pour simplicité (et contournement de certains bugs Java), tous les fichiers .java sont placés à la racine du projet.
 
-## Commandes
-Compiler les fichiers : javac *.java
-Lancer le programme : java ReconnaissanceChat.java
+Organisation du dataset
+- Placez un dossier nommé `dataset_animaux/` à la racine du projet. Il doit contenir deux sous-dossiers :
+	- `train/` — images d'entraînement
+	- `test/`  — images de test
+	Chaque sous-dossier doit contenir les classes : `cat/`, `dog/`, `wild/` (ou autres selon vos besoins).
 
+Compilation et exécution
+- Compiler tous les fichiers :
+	javac *.java
+- Lancer le programme principal :
+	java ReconnaissanceChat
 
-Le fichier __ReconnaissanceChat.java__ est le fichier de base du projet. Le neurone fonctionne de manière binaire : soit chat, soit pas chat
+Fichier principal
+- `ReconnaissanceChat.java` contient le flux principal d'apprentissage et d'évaluation. Le modèle implémente une classification binaire (chat / pas chat).
+- `ReconnaissanceAnimaux.java` permet de lancer une classification à 3 classes (chats, chiens, animaux sauvages) 
 
+Options et variantes
+Le code permet d'activer ou désactiver, via le fichier source, plusieurs options :
+- mélange (shuffle) ou non des données
+- normalisation ou non des entrées
+- représentation des images : RGB, TSL (HSV) ou niveaux de gris
+- type d'activation du neurone : Heaviside (seuil), ReLU, Sigmoïde
 
-Le fichier permet de tester l'apprentissage du neurone avec diverses options telles que :
-- avec ou sans mélange de données
-- avec ou sans normalisation
-- en RGB/TSL/Noir & Blanc
-- le type de neurone utilisé (Heavyside, ReLU, Sigmoïde)
+Usage rapide
+- Ouvrez `ReconnaissanceChat.java` et décommentez les blocs correspondant aux options souhaitées (mélange, normalisation, type d'activation, etc.).
+- Recompilez et exécutez.
 
-Pour cela, il suffit de décommenter le bout de code non voulu
+Conseils
+- Utilisez des images de taille cohérente (redimensionnez si nécessaire) pour de meilleurs résultats.
+- Commencez par un petit jeu d'entraînement pour vérifier que le pipeline fonctionne, puis augmentez les données.
+
+Licence et contact
+- Projet éducatif — pas de garantie.

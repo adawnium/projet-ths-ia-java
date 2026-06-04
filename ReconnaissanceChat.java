@@ -76,10 +76,12 @@ public class ReconnaissanceChat {
         if (chiens != null) tousLesFichiers.addAll(chiens);
         if (sauvages != null) tousLesFichiers.addAll(sauvages);
         
-        if (tousLesFichiers.isEmpty()) return null;
+        if (tousLesFichiers.isEmpty()) {
+            System.err.println("Erreur: Aucun fichier trouvé dans " + repertoireBase);
+            return null;
+        }
 
         int nbImages = tousLesFichiers.size();
-        
         Image premiereImage = new Image(tousLesFichiers.get(0), 0, true);
         int nbPixels = premiereImage.taille();
         int tailleCote = (int) Math.sqrt(nbPixels); 
@@ -88,74 +90,55 @@ public class ReconnaissanceChat {
         dataset.entrees = new float[nbImages][nbPixels];
         dataset.resultats = new float[nbImages];
 
-        float[][] modulesFFTBruts = new float[nbImages][nbPixels];
-        
+        System.out.println("Chargement et calcul FFT 1D (Ligne par Ligne) de " + nbImages + " images...");
+
         float maxGlobalFFT = maxForce; 
-        boolean doitCalculerMax = (maxForce <= 0.0f);
+        boolean doitCalculerMax = (maxForce <= 0.0f); // Vrai pour le Train, Faux pour le Test
 
-
+        // fft 1d sur chaque ligne et recherche du max globale pour la normalisation
         for (int i = 0; i < nbImages; i++) {
             String chemin = tousLesFichiers.get(i);
-            Image img = new Image(chemin, 0, true); 
+            
+            // labellisation : 1.0f pour Chat, 0.0f pour le reste
+            dataset.resultats[i] = chemin.contains("cat") ? 1.0f : 0.0f;
+
+            Image img = new Image(chemin, 0, true);
             int[] pixelsBruts = img.donnees();
 
+            
+            for (int ligne = 0; ligne < tailleCote; ligne++) {
+                Complexe[] signalLigne = new Complexe[tailleCote];
 
-            Complexe[][] matrice2D = new Complexe[tailleCote][tailleCote];
-            for (int y = 0; y < tailleCote; y++) {
-                for (int x = 0; x < tailleCote; x++) {
-                    matrice2D[y][x] = new ComplexeCartesien(pixelsBruts[y * tailleCote + x], 0.0);
+                for (int col = 0; col < tailleCote; col++) {
+                    signalLigne[col] = new ComplexeCartesien(pixelsBruts[ligne * tailleCote + col], 0.0);
                 }
-            }
 
+                // FFT Ligne par ligne pour un signal pur
+                Complexe[] spectreFFTLigne = FFTCplx.appliqueSur(signalLigne);
 
-            //on fait une fft 2d en appliquant d'abord la fft 1d sur les lignes, puis sur les colonnes
-            for (int y = 0; y < tailleCote; y++) {
-                //fft 1d sur ligne
-                matrice2D[y] = FFTCplx.appliqueSur(matrice2D[y]);
-            }
-
-            for (int x = 0; x < tailleCote; x++) {
-                Complexe[] colonne = new Complexe[tailleCote];
-                for (int y = 0; y < tailleCote; y++) {
-                    colonne[y] = matrice2D[y][x];
-                }
-                
-                // fft 1d sur colonne
-                colonne = FFTCplx.appliqueSur(colonne);
-                
-                for (int y = 0; y < tailleCote; y++) {
-                    matrice2D[y][x] = colonne[y];
-                }
-            }
-
-            for (int y = 0; y < tailleCote; y++) {
-                for (int x = 0; x < tailleCote; x++) {
-                    float mod = (float) matrice2D[y][x].mod();
-
-                    if (x == 0 && y == 0) {
-                        mod = 0.0f;
-                    } else {
-                        mod = (float) Math.log(1.0 + mod);
-                    }
-
-                    int indexPlat = y * tailleCote + x;
-                    modulesFFTBruts[i][indexPlat] = mod;
+                for (int col = 0; col < tailleCote; col++) {
+                    float amplitude = (float) spectreFFTLigne[col].mod();
                     
-                    if (doitCalculerMax && mod > maxGlobalFFT) {
-                        maxGlobalFFT = mod;
+                    // On stocke temporairement l'amplitude brute
+                    dataset.entrees[i][ligne * tailleCote + col] = amplitude;
+                    
+                    // On met à jour le maximum global si on est en phase d'entraînement
+                    if (doitCalculerMax && amplitude > maxGlobalFFT) {
+                        maxGlobalFFT = amplitude;
                     }
                 }
             }
-
-            dataset.resultats[i] = chemin.contains("cat") ? 1.0f : 0.0f;
         }
 
+        //on sauvegarde cette valeur dans le Dataset (pour la réutiliser au Test)
         dataset.valeurMaxFFT = maxGlobalFFT;
 
+        //on applique la normalisation gloabale
         if (maxGlobalFFT > 0) {
             for (int i = 0; i < nbImages; i++) {
-                for (int j = 0; j < nbPixels; j++) {
-                    dataset.entrees[i][j] = modulesFFTBruts[i][j] / maxGlobalFFT;
+                for (int p = 0; p < nbPixels; p++) {
+                    // On divise toutes les données brutes stockées par le maxglobal
+                    dataset.entrees[i][p] = dataset.entrees[i][p] / maxGlobalFFT;
                 }
             }
         }
@@ -181,7 +164,7 @@ public class ReconnaissanceChat {
         
         System.out.println("CHARGEMENT DES IMAGES D'ENTRAINEMENT");
         // Dataset trainData = chargerEtLabeliser("dataset_animaux/train");
-        Dataset trainData = chargerEtAppliquerFFT("dataset_animaux/train", 0.0f); // 0.0f car on force le calcul de la valeur max pour la normalisation
+        Dataset trainData = chargerEtAppliquerFFT("dataset_animaux/train", 0); // 0.0f car on force le calcul de la valeur max pour la normalisation
         if (trainData == null) return;
 
         float maxValeurFFTTrain = trainData.valeurMaxFFT; 
@@ -202,14 +185,14 @@ public class ReconnaissanceChat {
         iNeurone neurone = new NeuroneSigmoide(nbPixels);
         // iNeurone neurone = new NeuroneReLU(nbPixels);
         // iNeurone neurone = new NeuroneHeavyside(nbPixels);
-        final float MSElimite = 0.005f; 
+        final float MSElimite = 0.05f; 
         
         System.out.println("Lancement de l'apprentissage :");
         neurone.apprentissage(trainData.entrees, trainData.resultats, MSElimite);
 
         System.out.println("\nPHASE DE TEST");
         // Dataset testData = chargerEtLabeliser("dataset_animaux/test");
-        Dataset testData = chargerEtAppliquerFFT("dataset_animaux/test", maxValeurFFTTrain);
+        Dataset testData = chargerEtAppliquerFFT("dataset_animaux/test", maxValeurFFTTrain); // on réutilise la valeur max calculée sur le train pour normaliser le test
 
         if (testData == null) return;
 
@@ -232,7 +215,7 @@ public class ReconnaissanceChat {
 
         float precision = ((float) bonnesReponses / totalTest) * 100.0f;
         System.out.println("\n========================================");
-        System.out.printf("RÉSULTAT FINAL : %.2f%% d'accuracy'\n", precision);
+        System.out.printf("RÉSULTAT FINAL : %.2f%% d'accuracy\n", precision);
         System.out.println("(" + bonnesReponses + " images correctement classées sur " + totalTest + ")");
         System.out.println("========================================");
     }

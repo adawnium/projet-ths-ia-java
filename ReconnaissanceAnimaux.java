@@ -7,6 +7,7 @@ public class ReconnaissanceAnimaux {
     public static class Dataset {
         public float[][] entrees;
         public float[] resultats; // label réel : 0=chat, 1=chien, 2=wild
+        public float valeurMaxFFT; // uniquement pour les datasets FFT
     }
 
     public static Dataset chargerEtLabeliser(String repertoireBase) {
@@ -53,7 +54,7 @@ public class ReconnaissanceAnimaux {
         return dataset;
     }
 
-    public static Dataset chargerEtAppliquerFFT(String repertoireBase) {
+    public static Dataset chargerEtAppliquerFFT(String repertoireBase, float maxForce) {
         List<String> chats = Image.listeFichiers(repertoireBase + "/cat");
         List<String> chiens = Image.listeFichiers(repertoireBase + "/dog");
         List<String> sauvages = Image.listeFichiers(repertoireBase + "/wild");
@@ -76,40 +77,44 @@ public class ReconnaissanceAnimaux {
         dataset.entrees = new float[nbImages][nbPixels];
         dataset.resultats = new float[nbImages];
 
-        System.out.println("Chargement et calcul FFT de " + nbImages + " images depuis " + repertoireBase + "...");
+        float[][] modulesFFTBruts = new float[nbImages][nbPixels];
+        
+        float maxGlobalFFT = maxForce; 
+        boolean doitCalculerMax = (maxForce <= 0.0f);
 
         for (int i = 0; i < nbImages; i++) {
             String chemin = tousLesFichiers.get(i);
-            int label = chemin.contains("cat")  ? 0
-            : chemin.contains("dog")  ? 1
-            : chemin.contains("wild") ? 2
-            : 3;
-            Image img = new Image(chemin, label, true);
-            dataset.resultats[i] = img.label();
-
+            Image img = new Image(chemin, 0, true); // N&B forcé
             int[] pixelsBruts = img.donnees();
-            Complexe[] signalComplexe = new Complexe[nbPixels];
 
-            for (int p = 0; p < nbPixels; p++) {
-                signalComplexe[p] = new ComplexeCartesien(pixelsBruts[p], 0);
+            Complexe[] signalEntree = new Complexe[nbPixels];
+            for (int j = 0; j < nbPixels; j++) {
+                signalEntree[j] = new ComplexeCartesien(pixelsBruts[j], 0.0);
             }
 
-            Complexe[] spectreFFT = FFTCplx.appliqueSur(signalComplexe);
+            Complexe[] signalTransforme = FFTCplx.appliqueSur(signalEntree);
 
-            float maxAmplitude = 0.0001f; // Évite la division par zéro
-            for (int p = 0; p < nbPixels; p++) {
-                float amplitude = (float) spectreFFT[p].mod();
-                dataset.entrees[i][p] = amplitude;
+            for (int j = 0; j < nbPixels; j++) {
+                modulesFFTBruts[i][j] = (float) signalTransforme[j].mod();
                 
-                if (amplitude > maxAmplitude) {
-                    maxAmplitude = amplitude;
+                //s'execute uniquement lors de la phase d'entrainement
+                if (doitCalculerMax && modulesFFTBruts[i][j] > maxGlobalFFT) {
+                    maxGlobalFFT = modulesFFTBruts[i][j];
                 }
             }
-
-            for (int p = 0; p < nbPixels; p++) {
-                dataset.entrees[i][p] = dataset.entrees[i][p] / maxAmplitude;
-            }
+            dataset.resultats[i] = chemin.contains("cat") ? 1.0f : 0.0f;
         }
+
+        dataset.valeurMaxFFT = maxGlobalFFT;
+
+        if (maxGlobalFFT > 0) {
+            for (int i = 0; i < nbImages; i++) {
+                for (int j = 0; j < nbPixels; j++) {
+                    dataset.entrees[i][j] = modulesFFTBruts[i][j] / maxGlobalFFT;
+                }
+            }
+        } 
+
         return dataset;
     }
 
@@ -141,8 +146,13 @@ public class ReconnaissanceAnimaux {
     public static void main(String[] args) {
 
         System.out.println("--- PRÉPARATION ---");
-        Dataset trainData = chargerEtLabeliser("dataset_animaux/train");
+        // Dataset trainData = chargerEtLabeliser("dataset_animaux/train");
+        Dataset trainData = chargerEtAppliquerFFT("dataset_animaux/train", 0.0f); 
         if (trainData == null) return;
+
+        float maxValeurFFTTrain = trainData.valeurMaxFFT;
+        System.out.println("Valeur max normalisation FFT (train) : " + maxValeurFFTTrain);
+
         melangerDataset(trainData);
 
         //limiter le nombre d'images train pour accélérer l'apprentissage
@@ -151,7 +161,7 @@ public class ReconnaissanceAnimaux {
         trainData.resultats = java.util.Arrays.copyOf(trainData.resultats, limite);
 
         System.out.println("\n--- APPRENTISSAGE (One-vs-All) ---");
-        final float MSElimite = 0.05f;
+        final float MSElimite = 0.20f;
 
         System.out.println("Entraînement neurone chat :");
         iNeurone neuroneChat = entrainerNeurone(trainData, 0, MSElimite);
@@ -163,7 +173,8 @@ public class ReconnaissanceAnimaux {
         iNeurone neuroneWild = entrainerNeurone(trainData, 2, MSElimite);
 
         System.out.println("\n--- TEST DU MODÈLE ---");
-        Dataset testData = chargerEtLabeliser("dataset_animaux/test");
+        // Dataset testData = chargerEtLabeliser("dataset_animaux/test");
+        Dataset testData = chargerEtAppliquerFFT("dataset_animaux/test", maxValeurFFTTrain);
         if (testData == null) return;
 
         int bonnesReponses = 0;

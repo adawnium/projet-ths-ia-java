@@ -51,12 +51,13 @@ public class ReconnaissanceChat {
             dataset.resultats[i] = img.label();
 
             
-            // NORMALISATION : on passe de 0 à 255 à 0 à 1
+            // NORMALISATION : on divise tous les pixels par 255 pour les ramener entre 0 et 1
             int[] pixelsBruts = img.donnees();
             for (int p = 0; p < nbPixels; p++) {
                 dataset.entrees[i][p] = pixelsBruts[p] / 255.0f;
             }
 
+            // Pour TSL
             // float[] tsl = ConversionTSL.convertirEnTSL(img);
             // for (int p = 0; p < nbPixels; p++) {
             //     dataset.entrees[i][p] = tsl[p]; // déjà entre 0 et 1
@@ -78,8 +79,10 @@ public class ReconnaissanceChat {
         if (tousLesFichiers.isEmpty()) return null;
 
         int nbImages = tousLesFichiers.size();
+        
         Image premiereImage = new Image(tousLesFichiers.get(0), 0, true);
         int nbPixels = premiereImage.taille();
+        int tailleCote = (int) Math.sqrt(nbPixels); 
 
         Dataset dataset = new Dataset();
         dataset.entrees = new float[nbImages][nbPixels];
@@ -90,25 +93,60 @@ public class ReconnaissanceChat {
         float maxGlobalFFT = maxForce; 
         boolean doitCalculerMax = (maxForce <= 0.0f);
 
+
         for (int i = 0; i < nbImages; i++) {
             String chemin = tousLesFichiers.get(i);
-            Image img = new Image(chemin, 0, true); // N&B forcé
+            Image img = new Image(chemin, 0, true); 
             int[] pixelsBruts = img.donnees();
 
-            Complexe[] signalEntree = new Complexe[nbPixels];
-            for (int j = 0; j < nbPixels; j++) {
-                signalEntree[j] = new ComplexeCartesien(pixelsBruts[j], 0.0);
-            }
 
-            Complexe[] signalTransforme = FFTCplx.appliqueSur(signalEntree);
-
-            for (int j = 0; j < nbPixels; j++) {
-                modulesFFTBruts[i][j] = (float) signalTransforme[j].mod();
-    
-                if (doitCalculerMax && modulesFFTBruts[i][j] > maxGlobalFFT) {
-                    maxGlobalFFT = modulesFFTBruts[i][j];
+            Complexe[][] matrice2D = new Complexe[tailleCote][tailleCote];
+            for (int y = 0; y < tailleCote; y++) {
+                for (int x = 0; x < tailleCote; x++) {
+                    matrice2D[y][x] = new ComplexeCartesien(pixelsBruts[y * tailleCote + x], 0.0);
                 }
             }
+
+
+            //on fait une fft 2d en appliquant d'abord la fft 1d sur les lignes, puis sur les colonnes
+            for (int y = 0; y < tailleCote; y++) {
+                //fft 1d sur ligne
+                matrice2D[y] = FFTCplx.appliqueSur(matrice2D[y]);
+            }
+
+            for (int x = 0; x < tailleCote; x++) {
+                Complexe[] colonne = new Complexe[tailleCote];
+                for (int y = 0; y < tailleCote; y++) {
+                    colonne[y] = matrice2D[y][x];
+                }
+                
+                // fft 1d sur colonne
+                colonne = FFTCplx.appliqueSur(colonne);
+                
+                for (int y = 0; y < tailleCote; y++) {
+                    matrice2D[y][x] = colonne[y];
+                }
+            }
+
+            for (int y = 0; y < tailleCote; y++) {
+                for (int x = 0; x < tailleCote; x++) {
+                    float mod = (float) matrice2D[y][x].mod();
+
+                    if (x == 0 && y == 0) {
+                        mod = 0.0f;
+                    } else {
+                        mod = (float) Math.log(1.0 + mod);
+                    }
+
+                    int indexPlat = y * tailleCote + x;
+                    modulesFFTBruts[i][indexPlat] = mod;
+                    
+                    if (doitCalculerMax && mod > maxGlobalFFT) {
+                        maxGlobalFFT = mod;
+                    }
+                }
+            }
+
             dataset.resultats[i] = chemin.contains("cat") ? 1.0f : 0.0f;
         }
 
@@ -142,7 +180,7 @@ public class ReconnaissanceChat {
     public static void main(String[] args) {
         
         System.out.println("CHARGEMENT DES IMAGES D'ENTRAINEMENT");
-        //Dataset trainData = chargerEtLabeliser("dataset_animaux/train");
+        // Dataset trainData = chargerEtLabeliser("dataset_animaux/train");
         Dataset trainData = chargerEtAppliquerFFT("dataset_animaux/train", 0.0f); // 0.0f car on force le calcul de la valeur max pour la normalisation
         if (trainData == null) return;
 
@@ -162,9 +200,9 @@ public class ReconnaissanceChat {
         
         //choix du modèle de neurone (à décommenter au besoin)
         iNeurone neurone = new NeuroneSigmoide(nbPixels);
-        //iNeurone neurone = new NeuroneReLU(nbPixels);
+        // iNeurone neurone = new NeuroneReLU(nbPixels);
         // iNeurone neurone = new NeuroneHeavyside(nbPixels);
-        final float MSElimite = 0.10f; 
+        final float MSElimite = 0.005f; 
         
         System.out.println("Lancement de l'apprentissage :");
         neurone.apprentissage(trainData.entrees, trainData.resultats, MSElimite);
@@ -194,7 +232,7 @@ public class ReconnaissanceChat {
 
         float precision = ((float) bonnesReponses / totalTest) * 100.0f;
         System.out.println("\n========================================");
-        System.out.printf("RÉSULTAT FINAL : %.2f%% de précision\n", precision);
+        System.out.printf("RÉSULTAT FINAL : %.2f%% d'accuracy'\n", precision);
         System.out.println("(" + bonnesReponses + " images correctement classées sur " + totalTest + ")");
         System.out.println("========================================");
     }
